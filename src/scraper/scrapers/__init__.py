@@ -1,0 +1,3 @@
+from .base_scraper import BaseScraper
+from .tokopedia_shop_scraper import TokopediaShopScraper
+from .tokopedia_product_scraper import TokopediaProductScraper
