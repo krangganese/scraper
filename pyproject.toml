@@ -1,0 +1,28 @@
+[build-system]
+requires = ["uv_build >= 0.9.8, <0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "scraper"
+version = "2025.0.0"
+dependencies = [
+  "selenium>=4.15.0",
+  "pandas>=2.0.0",
+  "tqdm>=4.66.0",
+  "python-dotenv>=1.0.0",
+  "webdriver-manager>=4.0.0",
+  "fake-useragent>=1.4.0",
+  "openpyxl>=3.1.0",
+]
+requires-python = ">=3.9"
+authors = [
+  {name = "Dandi Pratama", email = "krangganese@gmail.com"}
+]
+maintainers = [
+  {name = "Dandi Pratama", email = "krangganese@gmail.com"}
+]
+readme = {file = "README.md", content-type = "text/markdown"}
+
+
+[project.scripts]
+scraper = "scraper.main:main"
