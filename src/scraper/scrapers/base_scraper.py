@@ -11,7 +11,7 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
-from config import (
+from scraper.config import (
     BROWSER,
     BROWSER_HEADLESS_MODE,
     BROWSER_IMPLICIT_WAIT,
@@ -19,8 +19,7 @@ from config import (
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
 )
-
-from utils import get_logger
+from scraper.utils import get_logger
 
 logger = get_logger(__name__)
 
