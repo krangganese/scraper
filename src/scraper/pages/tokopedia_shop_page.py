@@ -126,7 +126,7 @@ class TokopediaShopPage(BasePage):
             )
 
             if not product_container:
-                logger.error(f"No product container found")
+                logger.error(f"No product container found on page {current_page}")
                 break
 
             self.scroll_until_loaded(max_scrolls=3, delay=1.0)
@@ -134,6 +134,10 @@ class TokopediaShopPage(BasePage):
             product_cards = product_container.find_elements(
                 By.XPATH, self.PRODUCT_CARD_XPATH
             )
+
+            if not product_cards:
+                logger.warning(f"No products found on page {current_page}")
+                break
 
             logger.info(f"Found {len(product_cards)} products on page {current_page}")
 
@@ -150,7 +154,7 @@ class TokopediaShopPage(BasePage):
             # Navigate to next page if not on the last page
             if current_page < page:
                 if not self.next_page():
-                    logger.info("No more pages available.")
+                    logger.info(f"Reached last available page at page {current_page}. Stopping early.")
                     break
 
         logger.info(f"Total products scraped: {len(result)}")

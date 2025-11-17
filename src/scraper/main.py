@@ -215,6 +215,187 @@ def scrape_shop(args):
             return False
     except Exception as e:
         logger.error(f"Error scraping shop: {e}")
+        return False
+
+
+def scrape_batch_shop(args):
+    """Scrape products from multiple shops in batch"""
+    logger.info("Starting batch shop scraping")
+
+    shops = []
+    if args.input_file:
+        input_path = Path(args.input_file)
+
+        if not input_path.is_absolute():
+            input_path = INPUTS_DIR / input_path
+
+        try:
+            with open(input_path, "r") as file:
+                for line in file:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+
+                    # Format: username,page or just username
+                    parts = line.split(',')
+                    username = parts[0].strip()
+                    page = int(parts[1].strip()) if len(parts) > 1 else args.page
+                    shops.append({'username': username, 'page': page})
+
+            logger.info(f"Loaded {len(shops)} shops from {input_path}")
+        except FileNotFoundError:
+            logger.error(f"Input file not found: {input_path}")
+            return False
+        except Exception as e:
+            logger.error(f"Error reading input file {input_path}: {e}")
+            return False
+    elif args.shop_usernames:
+        # Command line arguments
+        for username in args.shop_usernames:
+            shops.append({'username': username, 'page': args.page})
+        logger.info(f"Loaded {len(shops)} shops from command line arguments")
+    else:
+        logger.error("No input file or shop usernames provided for batch scraping")
+        return False
+
+    if not shops:
+        logger.warning("No shops to scrape. Use --input-file or --shop-usernames.")
+        return False
+
+    logger.info(f"Starting batch scrape for {len(shops)} shops")
+
+    scraper = None
+    success_count = 0
+    failed_shops = []
+    all_products = []
+
+    try:
+        scraper = TokopediaShopScraper(headless=args.headless)
+        scraper.setup_driver()
+
+        reconnect_count = 0
+        max_reconnects = 3
+
+        for i, shop_info in enumerate(shops, start=1):
+            username = shop_info['username']
+            page = shop_info['page']
+
+            logger.info(f"[{i}/{len(shops)}] Scraping shop: {username} (pages: {page})")
+
+            retry_count = 0
+            max_retries = 3
+            success = False
+
+            while retry_count < max_retries and not success:
+                try:
+                    if not scraper.is_driver_alive():
+                        if reconnect_count < max_reconnects:
+                            scraper.reconnect_driver()
+                            reconnect_count += 1
+                        else:
+                            logger.error("Max WebDriver reconnect attempts reached.")
+                            failed_shops.append(f"{username},{page}")
+                            break
+
+                    # Build shop URL
+                    shop_url = TOKOPEDIA_SHOP_URL.format(username=username)
+                    products = scraper.scrape(shop_url, page=page)
+
+                    if products:
+                        # Add shop username to each product
+                        for product in products:
+                            product['shop_username'] = username
+
+                        all_products.extend(products)
+                        success_count += 1
+                        success = True
+                        reconnect_count = 0
+
+                        logger.info(f"✓ Scraped {len(products)} products from {username}")
+                    else:
+                        logger.warning(f"No products found for shop {username}")
+                        success = True  # Not a failure, just no products
+
+                    if i < len(shops):
+                        scraper.random_delay(3.0, 5.0)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"Failed to scrape shop {username}: {e}")
+
+                    if (
+                        "Connection refused" in error_msg
+                        or "session" in error_msg.lower()
+                    ):
+                        if scraper.reconnect_driver():
+                            reconnect_count += 1
+                            retry_count += 1
+                            continue
+                        else:
+                            logger.error("Cannot reconnect. Stopping.")
+                            failed_shops.extend([f"{s['username']},{s['page']}" for s in shops[i - 1:]])
+                            break
+
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        time.sleep(5)
+
+            if not success:
+                logger.error(f"Failed to scrape shop {username} after {max_retries} attempts.")
+                failed_shops.append(f"{username},{page}")
+
+            if reconnect_count >= max_reconnects:
+                logger.error("Max WebDriver reconnect attempts reached. Stopping batch.")
+                break
+
+        scraper.close()
+
+        logger.info(
+            f"Batch shop scraping completed: {success_count}/{len(shops)} shops succeeded, "
+            f"{len(all_products)} total products scraped."
+        )
+
+        # Export all products to single CSV
+        if all_products:
+            if args.filename:
+                filename = args.filename
+            else:
+                filename = generate_filename(
+                    prefix="batch_shops_products",
+                    extension="csv",
+                    timestamp=True,
+                )
+
+            output_dir = Path(args.output)
+            success = export_to_csv(
+                data=all_products,
+                output_dir=output_dir,
+                filename=filename,
+            )
+
+            if success:
+                logger.info(f"All products exported to {output_dir / filename}")
+
+        # Save failed shops if any
+        if failed_shops:
+            failed_file = EXPORTS_DIR / generate_filename(
+                prefix="failed_shops", extension="txt", timestamp=True
+            )
+            try:
+                with open(failed_file, "w") as f:
+                    f.write("# Format: username,page\n")
+                    f.write("\n".join(failed_shops))
+                logger.info(f"Failed shops saved to: {failed_file}")
+            except Exception as e:
+                logger.error(f"Failed to save failed shops to file: {e}")
+
+        return success_count > 0
+
+    except Exception as e:
+        logger.error(f"Error during batch shop scraping: {e}")
+        if scraper:
+            scraper.close()
+        return False
 
 
 def main():
@@ -305,6 +486,27 @@ def main():
         help="List of product URLs to scrape",
     )
 
+    # Batch shop scraper
+    batch_shop_parser = subparsers.add_parser(
+        "batch-shop", help="Scrape products from multiple shops in batch"
+    )
+    batch_shop_parser.add_argument(
+        "--input-file",
+        type=str,
+        help="Path to input file (format: username,page per line)",
+    )
+    batch_shop_parser.add_argument(
+        "--shop-usernames",
+        nargs="+",
+        help="List of shop usernames to scrape",
+    )
+    batch_shop_parser.add_argument(
+        "--page",
+        type=int,
+        default=5,
+        help="Default number of pages to scrape per shop (if not specified in file)",
+    )
+
     args = parser.parse_args()
 
     # Set log level
@@ -329,6 +531,8 @@ def main():
         success = scrape_image(args)
     elif args.command == "batch":
         success = scrape_batch(args)
+    elif args.command == "batch-shop":
+        success = scrape_batch_shop(args)
 
     print()
     print("=" * 60)
