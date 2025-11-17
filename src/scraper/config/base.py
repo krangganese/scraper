@@ -48,5 +48,5 @@ CONCURRENT_SCRAPERS = int(os.getenv("CONCURRENT_SCRAPERS", "1"))
 VERSION = "v2025.0.0"
 
 # Ensure directories exist
-for directory in [DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, EXPORTS_DIR, LOG_DIR]:
+for directory in [DATA_DIR, RAW_DATA_DIR, PROCESSED_DATA_DIR, EXPORTS_DIR, LOG_DIR, INPUTS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
