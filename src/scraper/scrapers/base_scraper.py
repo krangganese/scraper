@@ -18,8 +18,11 @@ from scraper.config import (
     BROWSER_LOAD_TIMEOUT,
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
+    MIN_DELAY,
+    MAX_DELAY,
 )
 from scraper.utils import get_logger
+import time
 
 logger = get_logger(__name__)
 
@@ -126,6 +129,29 @@ class BaseScraper(ABC):
             logger.error(f"Failed to navigate to {url}: {str(e)}")
             return False
 
+    def is_driver_alive(self):
+        """"""
+        if not self.driver:
+            return False
+
+        try:
+            self.driver.current_url
+            return True
+        except:
+            return False
+
+    def reconnect_driver(self):
+        """Reconnect the WebDriver"""
+        try:
+            self.close_driver()
+            time.sleep(2)
+            self.setup_driver()
+            logger.info("WebDriver reconnected.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reconnect WebDriver: {str(e)}")
+            return False
+
     def close_driver(self):
         """Close the WebDriver"""
         if self.driver:
@@ -134,6 +160,22 @@ class BaseScraper(ABC):
                 logger.info("WebDriver closed.")
             except Exception as e:
                 logger.error(f"Error closing WebDriver: {str(e)}")
+            finally:
+                self.driver = None
+                self._page_objects.clear()
+
+    def close(self):
+        """Alias for close_driver to properly close the scraper"""
+        self.close_driver()
+
+    def random_delay(self, min_delay=None, max_delay=None):
+        """Add random delay to avoid detection"""
+        min_d = min_delay if min_delay is not None else MIN_DELAY
+        max_d = max_delay if max_delay is not None else MAX_DELAY
+        delay = random.uniform(min_d, max_d)
+        logger.debug(f"Sleeping for {delay:.2f} seconds")
+        time.sleep(delay)
+        return delay
 
     def set_pipeline(self, pipeline):
         """Set the data pipeline"""

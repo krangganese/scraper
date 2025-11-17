@@ -14,6 +14,7 @@ from scraper.config import (
     TOKOPEDIA_SHOP_URL,
     BROWSER_HEADLESS_MODE,
     EXPORTS_DIR,
+    INPUTS_DIR,
     VERSION,
 )
 from scraper.utils import (
@@ -23,6 +24,7 @@ from scraper.utils import (
     export_to_csv,
 )
 from scraper.scrapers import TokopediaShopScraper, TokopediaProductScraper
+import time
 
 logger = get_logger(__name__)
 
@@ -38,6 +40,138 @@ def scrape_image(args):
 
     except Exception as e:
         logger.error(f"Error scraping product image: {e}")
+
+
+def scrape_batch(args):
+    """Scrape products from a batch of product URLs"""
+    logger.info("Scraping batch of product images")
+
+    urls = []
+    if args.input_file:
+        input_path = Path(args.input_file)
+
+        if not input_path.is_absolute():
+            input_path = INPUTS_DIR / input_path
+
+        try:
+            with open(input_path, "r") as file:
+                urls = [line.strip() for line in file if line.strip()]
+            logger.info(f"Loaded {len(urls)} URLs from {input_path}")
+        except FileNotFoundError:
+            logger.error(f"Input file not found: {input_path}")
+            return False
+        except Exception as e:
+            logger.error(f"Error reading input file {input_path}: {e}")
+            return False
+    elif args.product_urls:
+        urls = args.product_urls
+        logger.info(f"Loaded {len(urls)} URLs from command line arguments")
+    else:
+        logger.error("No input file or product URLs provided for batch scraping")
+        return False
+
+    if not urls:
+        logger.warning("No URLs. Use --input-file or --product-urls to provide URLs.")
+        return False
+
+    logger.info(f"Starting batch scrape for {len(urls)} product URLs")
+
+    scraper = None
+    success_count = 0
+    failed_urls = []
+    try:
+        scraper = TokopediaProductScraper(headless=args.headless)
+        scraper.setup_driver()
+
+        reconnect_count = 0
+        max_reconnects = 3
+
+        for i, url in enumerate(urls, start=1):
+            logger.info(f"[{i}/{len(urls)}] Scraping product URL: {url}")
+
+            retry_count = 0
+            max_retries = 3
+            success = False
+
+            while retry_count < max_retries and not success:
+                try:
+                    if not scraper.is_driver_alive():
+                        if reconnect_count < max_reconnects:
+                            scraper.reconnect_driver()
+                            reconnect_count += 1
+                        else:
+                            logger.error("Max WebDriver reconnect attempts reached.")
+                            failed_urls.append(url)
+                            break
+
+                    result = scraper.run(url)
+
+                    if result:
+                        success_count += 1
+                        success = True
+                        reconnect_count = 0
+                    else:
+                        retry_count += 1
+                        logger.warning(
+                            f"Scrape failed for {url}. Retrying ({retry_count}/{max_retries})..."
+                        )
+
+                    if i < len(urls):
+                        scraper.random_delay(2.0, 4.0)
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"Failed to scrape {url}: {e}")
+
+                    if (
+                        "Connection refused" in error_msg
+                        or "session" in error_msg.lower()
+                    ):
+                        if scraper.reconnect_driver():
+                            reconnect_count += 1
+                            retry_count += 1
+                            continue
+                        else:
+                            logger.error("Cannot reconnect. Stopping.")
+                            failed_urls.extend(urls[i - 1 :])
+                            break
+
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        time.sleep(5)
+
+            if not success:
+                logger.error(f"Failed to scrape {url} after {max_retries} attempts.")
+                failed_urls.append(url)
+
+            if reconnect_count >= max_reconnects:
+                logger.error(
+                    "Max WebDriver reconnect attempts reached. Stopping batch."
+                )
+                break
+
+        scraper.close()
+
+        logger.info(
+            f"Batch scraping completed: {success_count} succeeded, {len(failed_urls)} failed."
+        )
+
+        if failed_urls:
+            failed_file = EXPORTS_DIR / generate_filename(
+                prefix="failed_urls", extension="txt", timestamp=True
+            )
+            try:
+                with open(failed_file, "w") as f:
+                    f.write("\n".join(failed_urls))
+                logger.info(f"Failed URLs saved to: {failed_file}")
+            except Exception as e:
+                logger.error(f"Failed to save failed URLs to file: {e}")
+        return success_count > 0
+
+    except Exception as e:
+        logger.error(f"Error during batch scraping: {e}")
+        if scraper:
+            scraper.close()
+        return False
 
 
 def scrape_shop(args):
@@ -156,6 +290,21 @@ def main():
         help="URL of the Tokopedia product page",
     )
 
+    # Batch scraper
+    batch_parser = subparsers.add_parser(
+        "batch", help="Scrape product images from a batch of products"
+    )
+    batch_parser.add_argument(
+        "--input-file",
+        type=str,
+        help="Path to input file containing list of shop usernames or product URLs",
+    )
+    batch_parser.add_argument(
+        "--product-urls",
+        nargs="+",
+        help="List of product URLs to scrape",
+    )
+
     args = parser.parse_args()
 
     # Set log level
@@ -178,6 +327,8 @@ def main():
         success = scrape_shop(args)
     elif args.command == "image":
         success = scrape_image(args)
+    elif args.command == "batch":
+        success = scrape_batch(args)
 
     print()
     print("=" * 60)

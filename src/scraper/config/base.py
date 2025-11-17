@@ -27,6 +27,7 @@ DATA_DIR = BASE_DIR / os.getenv("DATA_DIR", "data")
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 EXPORTS_DIR = DATA_DIR / "exports"
+INPUTS_DIR = DATA_DIR / "inputs"
 
 # Anti-Bot settings
 MIN_DELAY = float(os.getenv("MIN_DELAY", "3"))
